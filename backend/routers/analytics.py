@@ -296,36 +296,85 @@ def query_data(
     try:
         df = load_dataframe(uploaded_file.storage_path, uploaded_file.file_type)
         
-        if query.x_col not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Kolom X '{query.x_col}' tidak ditemukan.")
+        # Robust Column Resolution (Exact -> Case-insensitive -> Partial/Fuzzy -> Synonyms)
+        def resolve_column(col_name: str, available_cols: list[str]) -> str:
+            if not col_name:
+                return ""
+            # 1. Exact match
+            if col_name in available_cols:
+                return col_name
+            # 2. Case-insensitive
+            for c in available_cols:
+                if c.strip().lower() == col_name.strip().lower():
+                    return c
+            # 3. Substring match
+            for c in available_cols:
+                if col_name.strip().lower() in c.lower() or c.lower() in col_name.strip().lower():
+                    return c
+            # 4. Synonym match
+            synonyms = {
+                "kategori": ["jenis", "kategori", "category", "tipe", "type", "nama"],
+                "produk": ["produk", "barang", "item", "product"],
+                "harga": ["harga", "price", "biaya", "cost", "tarif"],
+                "total": ["total", "penjualan", "sales", "revenue", "omset", "omzet", "pendapatan", "jumlah"],
+                "jumlah": ["jumlah", "qty", "quantity", "order", "banyak", "count"],
+                "tanggal": ["tanggal", "date", "waktu", "time", "hari", "bulan", "tahun"]
+            }
+            target_lower = col_name.lower()
+            for key, words in synonyms.items():
+                if any(w in target_lower for w in words):
+                    for c in available_cols:
+                        c_lower = c.lower()
+                        if any(w in c_lower for w in words):
+                            return c
+            return col_name
+
+        resolved_x = resolve_column(query.x_col, df.columns.tolist())
+        resolved_y = resolve_column(query.y_col, df.columns.tolist()) if query.y_col else ""
+
+        if resolved_x not in df.columns:
+            # Fallback to first categorical or any column
+            resolved_x = df.columns[0]
             
-        if query.y_col and query.y_col not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Kolom Y '{query.y_col}' tidak ditemukan.")
+        if query.y_col and resolved_y not in df.columns:
+            # Fallback to first numeric column if available
+            num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            if num_cols:
+                resolved_y = num_cols[0]
+            else:
+                resolved_y = df.columns[-1]
 
         df_res = df.copy()
 
         # Handle Aggregation
-        if query.aggregation != "none" and query.y_col:
+        if query.aggregation != "none" and resolved_y:
+            # Ensure numeric conversion if doing arithmetic
+            if query.aggregation in ["sum", "mean", "max", "min"]:
+                df_res[resolved_y] = pd.to_numeric(df_res[resolved_y], errors="coerce").fillna(0)
+
             if query.aggregation == "sum":
-                df_res = df_res.groupby(query.x_col, as_index=False)[query.y_col].sum()
+                df_res = df_res.groupby(resolved_x, as_index=False)[resolved_y].sum()
             elif query.aggregation == "mean":
-                df_res = df_res.groupby(query.x_col, as_index=False)[query.y_col].mean()
+                df_res = df_res.groupby(resolved_x, as_index=False)[resolved_y].mean()
             elif query.aggregation == "count":
-                df_res = df_res.groupby(query.x_col, as_index=False)[query.y_col].count()
+                df_res = df_res.groupby(resolved_x, as_index=False)[resolved_y].count()
             elif query.aggregation == "max":
-                df_res = df_res.groupby(query.x_col, as_index=False)[query.y_col].max()
+                df_res = df_res.groupby(resolved_x, as_index=False)[resolved_y].max()
             elif query.aggregation == "min":
-                df_res = df_res.groupby(query.x_col, as_index=False)[query.y_col].min()
+                df_res = df_res.groupby(resolved_x, as_index=False)[resolved_y].min()
             
+            # Round mean values for clean presentation
+            if query.aggregation == "mean":
+                df_res[resolved_y] = df_res[resolved_y].round(2)
+
             # Sort by Y descending for better visualization of top categories
-            df_res = df_res.sort_values(by=query.y_col, ascending=False).head(50)
+            df_res = df_res.sort_values(by=resolved_y, ascending=False).head(50)
         else:
-            # No aggregation, just select columns and limit to 100 rows
-            cols = [query.x_col]
-            if query.y_col:
-                cols.append(query.y_col)
+            cols = [resolved_x]
+            if resolved_y:
+                cols.append(resolved_y)
             df_res = df_res[cols].head(100)
-            
+
         # Bulletproof NaN serialization
         res_json = df_res.to_json(orient="records")
         
@@ -333,8 +382,8 @@ def query_data(
             "status": "success",
             "data": {
                 "chart_data": json.loads(res_json),
-                "x_col": query.x_col,
-                "y_col": query.y_col,
+                "x_col": resolved_x,
+                "y_col": resolved_y,
                 "chart_type": query.chart_type,
                 "aggregation": query.aggregation
             }
@@ -342,3 +391,148 @@ def query_data(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal melakukan query: {str(e)}")
+
+class CleanRequest(BaseModel):
+    handle_missing: str = "mean" # mean, median, drop
+    remove_duplicates: bool = True
+
+@router.post("/{session_id}/clean")
+def clean_data(
+    session_id: str,
+    req: CleanRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = db.query(SessionModel).filter(
+        SessionModel.id == session_id,
+        SessionModel.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesi tidak ditemukan")
+
+    uploaded_file = db.query(UploadedFile).filter(
+        UploadedFile.session_id == session_id
+    ).order_by(UploadedFile.created_at.desc()).first()
+
+    if not uploaded_file:
+        raise HTTPException(status_code=400, detail="Belum ada file yang diunggah")
+
+    try:
+        df = load_dataframe(uploaded_file.storage_path, uploaded_file.file_type)
+        original_rows = len(df)
+        
+        if req.remove_duplicates:
+            df = df.drop_duplicates()
+            
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if req.handle_missing == "drop":
+            df = df.dropna()
+        elif req.handle_missing == "mean":
+            for col in numeric_cols:
+                df[col] = df[col].fillna(df[col].mean())
+        elif req.handle_missing == "median":
+            for col in numeric_cols:
+                df[col] = df[col].fillna(df[col].median())
+                
+        cleaned_rows = len(df)
+        
+        # Save back to file
+        if uploaded_file.file_type == "csv":
+            df.to_csv(uploaded_file.storage_path, index=False)
+        else:
+            df.to_excel(uploaded_file.storage_path, index=False)
+            
+        return {
+            "status": "success",
+            "message": "Data berhasil dibersihkan",
+            "data": {
+                "original_rows": original_rows,
+                "cleaned_rows": cleaned_rows,
+                "rows_removed": original_rows - cleaned_rows
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal membersihkan data: {str(e)}")
+
+class ForecastRequest(BaseModel):
+    date_col: str
+    target_col: str
+    periods: int = 30
+
+@router.post("/{session_id}/forecast")
+def forecast_data(
+    session_id: str,
+    req: ForecastRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = db.query(SessionModel).filter(
+        SessionModel.id == session_id,
+        SessionModel.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesi tidak ditemukan")
+
+    uploaded_file = db.query(UploadedFile).filter(
+        UploadedFile.session_id == session_id
+    ).order_by(UploadedFile.created_at.desc()).first()
+
+    if not uploaded_file:
+        raise HTTPException(status_code=400, detail="Belum ada file yang diunggah")
+
+    try:
+        df = load_dataframe(uploaded_file.storage_path, uploaded_file.file_type)
+        
+        if req.date_col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Kolom tanggal '{req.date_col}' tidak ditemukan.")
+        if req.target_col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Kolom target '{req.target_col}' tidak ditemukan.")
+            
+        # Parse date and sort
+        df[req.date_col] = pd.to_datetime(df[req.date_col], errors='coerce')
+        df = df.dropna(subset=[req.date_col, req.target_col])
+        df = df.sort_values(req.date_col)
+        
+        # Aggregate by date if multiple entries per date
+        df_agg = df.groupby(req.date_col, as_index=False)[req.target_col].sum()
+        
+        # Simple forecasting using Holt-Winters (Exponential Smoothing)
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+        
+        ts_data = df_agg[req.target_col].values
+        if len(ts_data) < 3:
+            raise HTTPException(status_code=400, detail="Data terlalu sedikit untuk peramalan (minimal 3 hari).")
+            
+        model = ExponentialSmoothing(ts_data, trend='add', seasonal=None, initialization_method="estimated")
+        fit_model = model.fit()
+        forecast_vals = fit_model.forecast(req.periods)
+        
+        # Prepare response data
+        historical_data = []
+        for _, row in df_agg.iterrows():
+            historical_data.append({
+                "date": row[req.date_col].strftime('%Y-%m-%d'),
+                "value": row[req.target_col],
+                "type": "historical"
+            })
+            
+        last_date = df_agg[req.date_col].max()
+        forecast_data = []
+        for i, val in enumerate(forecast_vals):
+            next_date = last_date + pd.Timedelta(days=i+1)
+            forecast_data.append({
+                "date": next_date.strftime('%Y-%m-%d'),
+                "value": val,
+                "type": "forecast"
+            })
+            
+        return {
+            "status": "success",
+            "data": {
+                "historical": historical_data,
+                "forecast": forecast_data
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal melakukan peramalan: {str(e)}")

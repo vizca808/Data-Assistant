@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
+const BACKEND_INTERNAL_URL = process.env.BACKEND_INTERNAL_URL || "http://backend:8000";
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -13,7 +14,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         try {
-          const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+          const res = await fetch(`${BACKEND_INTERNAL_URL}/api/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -28,7 +29,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const token = data.access_token;
 
           // Get user info
-          const userRes = await fetch(`${BACKEND_URL}/api/auth/me`, {
+          const userRes = await fetch(`${BACKEND_INTERNAL_URL}/api/auth/me`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 

@@ -1,0 +1,122 @@
+{
+  "name": "AI Data Assistant Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "path": "datamind-chat",
+        "options": {}
+      },
+      "id": "trigger-chat-1",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Kamu adalah AI Data Assistant profesional. Tugasmu adalah membantu pengguna memahami data mereka. \n\nGunakan tool 'AmbilData' untuk menarik ringkasan informasi dan nama-nama kolom dari database. Jika pengguna bertanya tentang statistik atau data, gunakan tool tersebut untuk mencari konteksnya, lalu jawab dengan bahasa Indonesia yang jelas.",
+        "options": {
+          "systemMessage": "Kamu adalah AI Data Assistant."
+        }
+      },
+      "id": "agent-1",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "modelName": "gemini-1.5-flash"
+      },
+      "id": "model-gemini-1",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [180, 240]
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "id": "memory-1",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [320, 240]
+    },
+    {
+      "parameters": {
+        "name": "AmbilData",
+        "description": "Panggil tool ini saat kamu butuh tahu nama kolom atau ringkasan data pengguna.",
+        "url": "http://backend:8000/api/chat/session-data/{{ $('When chat message received').item.json.metadata.sessionId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "tool-http-1",
+      "name": "HTTP Request Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [460, 240]
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": true
+}

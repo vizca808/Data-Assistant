@@ -6,12 +6,16 @@ import { api } from "@/lib/api";
 import { FileInfo } from "@/lib/types";
 import { UploadZone } from "./UploadZone";
 import { ChartBuilder } from "./ChartBuilder";
+import { DataTable } from "./DataTable";
 import { 
   Activity, AlertTriangle, Database, FileText, 
-  BarChart3, Sparkles, BrainCircuit, Network, X, ArrowLeft 
+  BarChart3, Sparkles, BrainCircuit, Network, X, ArrowLeft, Download 
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ScatterChart, Scatter, ZAxis, Cell, PieChart, Pie, Legend } from "recharts";
 import Link from "next/link";
+import { Heatmap } from "./Heatmap";
+import { DataCleaning } from "./DataCleaning";
+import { Forecasting } from "./Forecasting";
 
 interface SmartReportProps {
   sessionId: string;
@@ -167,12 +171,22 @@ export function SmartReport({ sessionId }: SmartReportProps) {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => setFile(null)}
-          className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-all"
-        >
-          <X className="w-4 h-4" /> Ganti File
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 rounded-lg text-xs font-medium transition-all cursor-pointer"
+            title="Cetak / Unduh PDF Laporan"
+          >
+            <Download className="w-3.5 h-3.5 text-accent-primary" />
+            <span>Export PDF</span>
+          </button>
+          <button
+            onClick={() => setFile(null)}
+            className="flex items-center gap-2 px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-lg text-xs font-medium transition-all cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" /> Ganti File
+          </button>
+        </div>
       </div>
 
       <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -219,6 +233,36 @@ export function SmartReport({ sessionId }: SmartReportProps) {
             </div>
           </section>
         )}
+
+        {/* Correlation Heatmap */}
+        {profile?.correlation && Object.keys(profile.correlation).length > 1 && (
+          <section className="fade-in delay-150">
+            <div className="flex items-center gap-2 mb-4">
+              <Network className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-xl font-bold text-text-primary">Heatmap Korelasi</h2>
+            </div>
+            <div className="glass-card p-6">
+              <p className="text-sm text-text-secondary mb-4">Melihat hubungan antar kolom numerik. Nilai mendekati 1 (hijau) berarti korelasi positif kuat, mendekati -1 (merah) korelasi negatif kuat.</p>
+              <Heatmap correlation={profile.correlation} />
+            </div>
+          </section>
+        )}
+
+        {/* Data Cleaning */}
+        <section className="fade-in delay-150">
+          <DataCleaning 
+            sessionId={sessionId} 
+            file={file} 
+            onCleanSuccess={() => {
+              // Reload profile data if needed, or rely on page refresh
+            }} 
+          />
+        </section>
+
+        {/* Forecasting */}
+        <section className="fade-in delay-150">
+          <Forecasting sessionId={sessionId} file={file} numericCols={profile?.stats?.numeric_columns || []} />
+        </section>
 
         <div className="grid md:grid-cols-2 gap-8">
           {/* Clustering Section */}
@@ -299,6 +343,13 @@ export function SmartReport({ sessionId }: SmartReportProps) {
             </div>
           </section>
         </div>
+
+        {/* Data Preview Table */}
+        {file && profile?.stats?.preview && (
+          <section className="fade-in delay-350">
+            <DataTable file={file} previewData={profile.stats.preview} />
+          </section>
+        )}
 
         {/* Interactive Chart Builder */}
         {profile?.stats && (

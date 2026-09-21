@@ -17,7 +17,7 @@ interface ChartBuilderProps {
 
 interface ChartItem {
   id: string;
-  config: { chartType: string; xCol: string; yCol: string; aggregation: string };
+  config: { chartType: string; xCol: string; yCol: string; aggregation: string; colorTheme?: string };
   data: any[];
   insight: string;
   insightLoading: boolean;
@@ -37,11 +37,16 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
   const [xCol, setXCol] = useState(categoricalCols[0] || allCols[0] || "");
   const [yCol, setYCol] = useState(numericCols[0] || "");
   const [aggregation, setAggregation] = useState("sum");
+  const [colorTheme, setColorTheme] = useState("default");
   
   const [loading, setLoading] = useState(false);
 
-  const addChart = async () => {
-    if (!xCol || !yCol) return;
+  const addChart = async (customConfig?: { chartType: string; xCol: string; yCol: string; aggregation: string; colorTheme?: string }) => {
+    const configToUse = customConfig || { chartType, xCol, yCol, aggregation, colorTheme };
+    if (!configToUse.xCol || !configToUse.yCol) {
+      alert("Harap pilih kolom X dan kolom Y terlebih dahulu.");
+      return;
+    }
     
     const token = (sessionData as any)?.accessToken;
     if (!token) return;
@@ -49,7 +54,6 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
     setLoading(true);
 
     const newChartId = Date.now().toString();
-    const config = { chartType, xCol, yCol, aggregation };
     
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/analytics/${sessionId}/query`, {
@@ -59,20 +63,28 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          x_col: config.xCol,
-          y_col: config.yCol,
-          chart_type: config.chartType,
-          aggregation: config.aggregation
+          x_col: configToUse.xCol,
+          y_col: configToUse.yCol,
+          chart_type: configToUse.chartType,
+          aggregation: configToUse.aggregation
         })
       });
 
-      if (!res.ok) throw new Error("Gagal mengambil data grafik");
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || "Gagal mengambil data grafik");
+      }
 
       const d = await res.json();
       
       const newChart: ChartItem = {
         id: newChartId,
-        config,
+        config: {
+          chartType: d.data.chart_type || configToUse.chartType,
+          xCol: d.data.x_col || configToUse.xCol,
+          yCol: d.data.y_col || configToUse.yCol,
+          aggregation: d.data.aggregation || configToUse.aggregation
+        },
         data: d.data.chart_data,
         insight: "",
         insightLoading: true,
@@ -83,10 +95,10 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
       setCharts(prev => [newChart, ...prev]);
       
       // Fetch insight asynchronously
-      generateInsight(newChartId, d.data.chart_data, config);
+      generateInsight(newChartId, d.data.chart_data, newChart.config);
       
     } catch (err: any) {
-      alert(err.message);
+      alert(err.message || "Terjadi kesalahan saat membuat grafik.");
     } finally {
       setLoading(false);
     }
@@ -148,7 +160,16 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
     const { config, data } = chart;
     if (data.length === 0) return <div className="h-full flex items-center justify-center text-text-secondary">Tidak ada data</div>;
 
-    const colors = ["#3b82f6", "#ec4899", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"];
+    const themeMap: Record<string, string[]> = {
+      default: ["#3b82f6", "#ec4899", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"],
+      ocean: ["#0284c7", "#0ea5e9", "#38bdf8", "#7dd3fc", "#bae6fd"],
+      emerald: ["#059669", "#10b981", "#34d399", "#6ee7b7", "#a7f3d0"],
+      sunset: ["#ea580c", "#f97316", "#fb923c", "#fcd34d", "#fde047"],
+      purple: ["#7e22ce", "#9333ea", "#a855f7", "#c084fc", "#d8b4fe"],
+    };
+
+    const colors = themeMap[config.colorTheme || "default"] || themeMap.default;
+    const primaryColor = colors[0];
 
     if (config.chartType === "bar") {
       return (
@@ -158,7 +179,7 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
             <XAxis dataKey={config.xCol} stroke="#888" tick={{ fill: '#888', fontSize: 12 }} angle={-45} textAnchor="end" />
             <YAxis stroke="#888" tick={{ fill: '#888', fontSize: 12 }} tickFormatter={(val) => new Intl.NumberFormat('id-ID', { notation: "compact", compactDisplay: "short" }).format(val)} />
             <Tooltip contentStyle={{ backgroundColor: '#1e1e2d', borderColor: '#3b3b4f', color: '#fff' }} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-            <Bar dataKey={config.yCol} fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            <Bar dataKey={config.yCol} fill={primaryColor} radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -172,7 +193,7 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
             <XAxis dataKey={config.xCol} stroke="#888" tick={{ fill: '#888', fontSize: 12 }} angle={-45} textAnchor="end" />
             <YAxis stroke="#888" tick={{ fill: '#888', fontSize: 12 }} tickFormatter={(val) => new Intl.NumberFormat('id-ID', { notation: "compact", compactDisplay: "short" }).format(val)} />
             <Tooltip contentStyle={{ backgroundColor: '#1e1e2d', borderColor: '#3b3b4f', color: '#fff' }} />
-            <Line type="monotone" dataKey={config.yCol} stroke="#ec4899" strokeWidth={3} dot={{ r: 4, fill: "#ec4899" }} activeDot={{ r: 6 }} />
+            <Line type="monotone" dataKey={config.yCol} stroke={primaryColor} strokeWidth={3} dot={{ r: 4, fill: primaryColor }} activeDot={{ r: 6 }} />
           </LineChart>
         </ResponsiveContainer>
       );
@@ -197,6 +218,69 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
     return null;
   };
 
+  // Natural language query input state
+  const [nlQuery, setNlQuery] = useState("");
+  const [nlLoading, setNlLoading] = useState(false);
+
+  // Generate chart config automatically using AI and create chart immediately
+  const handleGenerateAIChart = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nlQuery.trim() || nlLoading) return;
+
+    const token = (sessionData as any)?.accessToken;
+    if (!token) return;
+
+    setNlLoading(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/ai/parse-chart`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          query: nlQuery,
+          columns: allCols,
+          numeric_columns: numericCols,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const conf = data.data;
+        const finalChartType = conf.chart_type || chartType;
+        const finalXCol = conf.x_col || xCol;
+        const finalYCol = conf.y_col || yCol;
+        const finalAgg = conf.aggregation || aggregation;
+
+        // Update form controls
+        setChartType(finalChartType);
+        setXCol(finalXCol);
+        setYCol(finalYCol);
+        setAggregation(finalAgg);
+
+        // Directly generate & render chart!
+        await addChart({
+          chartType: finalChartType,
+          xCol: finalXCol,
+          yCol: finalYCol,
+          aggregation: finalAgg,
+        });
+
+        // Clear input prompt once created
+        setNlQuery("");
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        alert(errJson.detail || "AI gagal memproses konfigurasi grafik.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Terjadi kesalahan saat memproses permintaan AI.");
+    } finally {
+      setNlLoading(false);
+    }
+  };
+
   return (
     <section className="fade-in delay-400 mt-12">
       <div className="flex items-center justify-between mb-6">
@@ -204,8 +288,37 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
           <div className="p-2 bg-blue-500/10 rounded-lg">
             <LayoutGrid className="w-6 h-6 text-blue-400" />
           </div>
-          <h2 className="text-2xl font-bold text-text-primary">Custom Dashboard</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-text-primary">Custom Dashboard</h2>
+            <p className="text-xs text-text-secondary">Buat visualisasi interaktif manual atau minta bantuan AI instan</p>
+          </div>
         </div>
+      </div>
+
+      {/* AI Prompt to Chart Generator */}
+      <div className="glass-card border border-indigo-500/30 p-5 shadow-xl mb-6 bg-gradient-to-r from-indigo-950/20 via-zinc-900 to-cyan-950/20 rounded-2xl">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-4 h-4 text-accent-primary" />
+          <h4 className="text-sm font-semibold text-text-primary">AI Smart Chart Generator</h4>
+        </div>
+        <p className="text-xs text-text-secondary mb-3">Ketik apa yang ingin Anda visualisasikan, AI akan otomatis memilih sumbu & langsung membuat grafiknya.</p>
+        <form onSubmit={handleGenerateAIChart} className="flex gap-2">
+          <input
+            type="text"
+            value={nlQuery}
+            onChange={(e) => setNlQuery(e.target.value)}
+            placeholder="Contoh: Rata-rata harga per kategori barang, atau Total order per tanggal..."
+            className="flex-1 bg-bg-secondary border border-border text-text-primary rounded-xl px-4 py-2 text-xs sm:text-sm focus:border-accent-primary outline-none"
+          />
+          <button
+            type="submit"
+            disabled={nlLoading || !nlQuery.trim()}
+            className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-cyan-500 text-white font-medium rounded-xl text-xs sm:text-sm flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-lg shadow-indigo-500/20"
+          >
+            {nlLoading ? <div className="spinner w-3.5 h-3.5 border-2 border-white"></div> : <Sparkles className="w-3.5 h-3.5" />}
+            <span>{nlLoading ? "Membuat..." : "Buat Grafik AI"}</span>
+          </button>
+        </form>
       </div>
       
       {/* Visual Builder UI */}
@@ -213,10 +326,10 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
         <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
           <Settings2 className="w-5 h-5 text-text-secondary" />
-          Buat Grafik Baru
+          Pengaturan Grafik
         </h3>
         
-        <div className="grid md:grid-cols-5 gap-5">
+        <div className="grid md:grid-cols-6 gap-5">
           {/* Chart Type Selection */}
           <div className="space-y-2">
             <label className="block text-xs font-medium text-text-secondary">Tipe Grafik</label>
@@ -279,10 +392,26 @@ export function ChartBuilder({ sessionId, numericCols, categoricalCols }: ChartB
             </select>
           </div>
           
+          {/* Color Theme */}
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-text-secondary">Tema Warna</label>
+            <select 
+              value={colorTheme} 
+              onChange={e => setColorTheme(e.target.value)}
+              className="w-full bg-bg-secondary border border-border text-text-primary rounded-xl py-2.5 px-4 text-sm focus:border-accent-primary focus:ring-1 focus:ring-accent-primary outline-none appearance-none cursor-pointer transition-all hover:border-accent-primary/50"
+            >
+              <option value="default" className="bg-[#1a1a24] text-white">Default (Biru)</option>
+              <option value="ocean" className="bg-[#1a1a24] text-white">Ocean (Biru Laut)</option>
+              <option value="emerald" className="bg-[#1a1a24] text-white">Emerald (Hijau)</option>
+              <option value="sunset" className="bg-[#1a1a24] text-white">Sunset (Jingga)</option>
+              <option value="purple" className="bg-[#1a1a24] text-white">Purple (Ungu)</option>
+            </select>
+          </div>
+          
           {/* Add Button */}
-          <div className="flex items-end">
+          <div className="flex items-end md:col-span-1 col-span-full mt-2 md:mt-0">
             <button 
-              onClick={addChart}
+              onClick={() => addChart()}
               disabled={loading || !xCol || !yCol}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 px-4 rounded-xl text-sm font-medium transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 disabled:opacity-50"
             >

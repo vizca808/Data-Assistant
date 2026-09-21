@@ -32,11 +32,11 @@ Permintaan User: "{req.query}"
 
 Aturan:
 1. "chart_type": pilih salah satu dari: "bar", "line", "pie", "scatter". (Default: "bar").
-2. "x_col": pilih salah satu kolom dari Semua Kolom yang paling cocok sebagai pengelompokan/sumbu X (misal: kategori, tanggal, ID).
-3. "y_col": pilih salah satu kolom dari Kolom Numerik yang paling cocok untuk dihitung (misal: harga, jumlah, pendapatan).
-4. "aggregation": pilih salah satu dari: "sum", "mean", "count", "max", "min", "none". (Jika user minta 'total' gunakan 'sum'. Jika 'rata-rata' gunakan 'mean'. Default 'sum').
+2. "x_col": HARUS persis sama (exact match, case-sensitive) dengan salah satu nama dari daftar Semua Kolom: {req.columns}. Jangan mengarang atau menerjemahkan nama kolom! Pilih kolom yang paling cocok (misal jika user menyebut 'kategori barang', dan kolomnya 'Jenis Produk', maka pilih 'Jenis Produk').
+3. "y_col": HARUS persis sama (exact match, case-sensitive) dengan salah satu nama dari daftar Kolom Numerik: {req.numeric_columns}. Jangan mengarang nama kolom!
+4. "aggregation": pilih salah satu dari: "sum", "mean", "count", "max", "min", "none". (Jika user minta 'rata-rata' gunakan 'mean', jika 'total' gunakan 'sum'. Default: 'sum').
 
-Format balasan HARUS berupa JSON valid persis seperti ini (jangan tambah markdown ```json):
+Format balasan HARUS berupa JSON valid persis seperti ini (tanpa markdown ```json):
 {{
     "chart_type": "...",
     "x_col": "...",
@@ -45,7 +45,7 @@ Format balasan HARUS berupa JSON valid persis seperti ini (jangan tambah markdow
 }}
 """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         # bersihkan respon dari kemungkinan markdown
         txt = response.text.replace("```json", "").replace("```", "").strip()
@@ -79,7 +79,7 @@ Data Teratas (Top 10):
 Tulis insight secara profesional dalam bahasa Indonesia. Jika ada sesuatu yang mendominasi atau tren menarik, sebutkan secara spesifik. Jangan menyebutkan "berikut adalah kesimpulannya" dll, langsung ke intinya.
 """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         insight = response.text.strip()
         return {"status": "success", "data": {"insight": insight}}

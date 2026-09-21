@@ -5,4 +5,7 @@ __pycache__/
 node_modules/
 .next/
 backend/storage/
+backend/data.db
+backend/chroma_db/
 frontend/.next/
+*.rar
